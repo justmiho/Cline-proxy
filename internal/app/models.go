@@ -44,14 +44,7 @@ const (
 
 const recommendedModelsURL = cline.ClineAPIBase + "/ai/cline/recommended-models"
 
-func seedModelCandidates() []*ModelInfo {
-	return []*ModelInfo{
-		{ID: "deepseek/deepseek-v4-flash", Source: "free", Provider: "deepseek", Cost: "free", RequiresStream: true},
-		{ID: "poolside/laguna-s-2.1:free", Source: "free", Provider: "poolside", Cost: "free"},
-		{ID: "stepfun/step-3.7-flash", Source: "free", Provider: "stepfun", Cost: "free", RequiresStream: true},
-	}
-}
-
+// initModelsCache 初始化空模型表；模型列表完全由官方 recommended-models 接口动态同步，不再内置种子
 func initModelsCache() {
 	modelsMu.Lock()
 	defer modelsMu.Unlock()
@@ -59,9 +52,6 @@ func initModelsCache() {
 		return
 	}
 	modelsCache = make(map[string]*ModelInfo)
-	for _, m := range seedModelCandidates() {
-		modelsCache[m.ID] = m
-	}
 }
 
 func getFreeModels() []*ModelInfo {

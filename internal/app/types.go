@@ -26,6 +26,7 @@ type AccountPool struct {
 	CurrentIdx    int        `json:"currentIdx"`
 	Keys          []string   `json:"keys,omitempty"`
 	DefaultModel  string     `json:"defaultModel,omitempty"` // 用户自定义默认模型，持久化
+	Admin         *AdminAuth `json:"admin,omitempty"`        // 管理面板登录凭据
 }
 
 type LoginMethod int

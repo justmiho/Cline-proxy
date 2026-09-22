@@ -191,6 +191,16 @@ body:not([data-theme="dark"]) .theme-toggle .dark-label{display:none}
 </style>
 </head>
 <body>
+<div id="loginOverlay" style="display:none;position:fixed;inset:0;z-index:9000;background:var(--bg);align-items:center;justify-content:center">
+  <div style="width:360px;max-width:92vw;background:var(--panel);backdrop-filter:blur(14px);border:1px solid var(--border);border-radius:var(--radius);padding:28px 26px;box-shadow:var(--glow)">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px"><span class="logo" style="width:32px;height:32px;border-radius:8px;background:var(--accent-grad);display:inline-flex;align-items:center;justify-content:center;color:#04121a">⚡</span><span style="font-size:17px;font-weight:700">Cline 代理 · 登录</span></div>
+    <div class="field" style="margin-bottom:12px"><label>用户名</label><input type="text" id="loginUser" autocomplete="username" value="admin"></div>
+    <div class="field" style="margin-bottom:16px"><label>密码</label><input type="password" id="loginPass" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"></div>
+    <button class="btn btn-primary" style="width:100%" onclick="doLogin()">登录</button>
+    <div id="loginErr" style="color:var(--danger);font-size:12.5px;margin-top:10px;min-height:16px"></div>
+    <div class="hint" style="margin-top:8px">默认账号 admin / admin，登录后请在「设置」中修改。</div>
+  </div>
+</div>
 <div class="layout">
 <div class="sidebar">
 <h1><span class="logo">⚡</span><span class="brand-name">Cline 代理</span><button class="theme-toggle" onclick="toggleTheme()" title="切换主题"><span class="icon" id="themeIcon">🌙</span><span class="light-label">浅色</span><span class="dark-label">深色</span></button></h1>
@@ -201,6 +211,7 @@ body:not([data-theme="dark"]) .theme-toggle .dark-label{display:none}
 <div class="nav-item" data-tab="logs"><span class="nav-ico">📜</span> 请求日志</div>
 <div class="nav-item" data-tab="opencode"><span class="nav-ico">🌐</span> opencode 免费模型</div>
 <div class="sidebar-footer">
+  <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">👤 <span id="footerUser">-</span><button class="btn btn-sm" style="margin-left:auto" onclick="doLogout()">退出</button></div>
   <div>管理面板: <a href="/admin/">/admin/</a></div>
   <div>API 地址: <span id="footerApiAddr">http://127.0.0.1:3457</span></div>
 </div>
@@ -325,11 +336,31 @@ body:not([data-theme="dark"]) .theme-toggle .dark-label{display:none}
 <h2>⚙️ 设置</h2>
 
 <div class="section">
+  <div class="section-title">👤 管理员账号 <span id="authDefaultWarn" class="probe-pill" style="font-weight:normal;color:var(--amber);display:none">⚠ 仍在使用默认密码</span></div>
+  <div class="section-body">
+    <div class="form-row">
+      <div class="field"><label>用户名</label><input type="text" id="authUser" autocomplete="username" placeholder="留空则不修改"></div>
+      <div class="field"><label>当前密码 <span style="color:var(--danger)">*</span></label><input type="password" id="authCurPass" autocomplete="current-password"></div>
+    </div>
+    <div class="form-row">
+      <div class="field"><label>新密码</label><input type="password" id="authNewPass" autocomplete="new-password" placeholder="留空则不修改"></div>
+      <div class="field"><label>确认新密码</label><input type="password" id="authNewPass2" autocomplete="new-password"></div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-primary" onclick="updateAuth()">💾 保存账号信息</button>
+    </div>
+    <div class="hint">修改后所有已登录会话将失效，需要重新登录。</div>
+  </div>
+</div>
+
+<div class="section">
   <div class="section-title">🔑 API 密钥管理</div>
   <div class="section-body">
     <p class="hint">生成的密钥可用于客户端访问代理 API（作为 x-api-key 或 Authorization 头）。</p>
-    <div class="form-actions" style="margin-bottom:14px">
-      <button class="btn btn-success" onclick="generateKey()">➕ 生成新密钥</button>
+    <div class="flex" style="margin-bottom:14px;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-success" onclick="generateKey()">➕ 随机生成</button>
+      <input type="text" id="customKeyInput" placeholder="或输入自定义密钥（8~256 位可见字符）" style="flex:1;min-width:240px;font-family:'JetBrains Mono',Consolas,monospace" onkeydown="if(event.key==='Enter')addCustomKey()">
+      <button class="btn btn-primary" onclick="addCustomKey()">➕ 添加自定义</button>
     </div>
     <div id="keysList"></div>
     <div id="keyGenResult" style="margin-top:8px"></div>
@@ -612,12 +643,75 @@ document.querySelectorAll('#importTabs .tab').forEach(el => {
 
 // ========== API 请求 ==========
 async function api(method, path, body) {
-  const opts = { method, headers: {} };
+  const opts = { method, headers: {}, credentials: 'same-origin' };
   if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
   const res = await fetch(API + path, opts);
+  if (res.status === 401 && !path.startsWith('/auth/')) { showLogin(); throw new Error('未登录'); }
   const data = await res.json();
   if (!data.success && data.error) throw new Error(data.error);
   return data;
+}
+
+// ========== 登录 ==========
+let _loggedIn = false;
+function showLogin() {
+  if (_('loginOverlay').style.display === 'flex') return;
+  _loggedIn = false;
+  _('loginOverlay').style.display = 'flex';
+  _('loginErr').textContent = '';
+  setTimeout(() => _('loginPass').focus(), 50);
+}
+function hideLogin() { _('loginOverlay').style.display = 'none'; }
+function applyAuthInfo(d) {
+  _('footerUser').textContent = d.username || '-';
+  _('authUser').placeholder = d.username || '';
+  _('authDefaultWarn').style.display = d.isDefault ? '' : 'none';
+}
+async function checkAuth() {
+  try {
+    const res = await fetch(API + '/auth/me', { credentials: 'same-origin' });
+    if (res.status !== 200) { showLogin(); return false; }
+    const d = await res.json();
+    applyAuthInfo(d.data || {});
+    _loggedIn = true;
+    hideLogin();
+    if (d.data && d.data.isDefault) toast('当前使用默认密码 admin/admin，建议尽快在「设置」中修改', 'warning', 6000);
+    return true;
+  } catch (e) { showLogin(); return false; }
+}
+async function doLogin() {
+  const username = _('loginUser').value.trim(), password = _('loginPass').value;
+  _('loginErr').textContent = '';
+  try {
+    const d = await api('POST', '/auth/login', { username, password });
+    applyAuthInfo(d.data || {});
+    _loggedIn = true;
+    hideLogin();
+    _('loginPass').value = '';
+    toast('登录成功', 'success');
+    if (d.data && d.data.isDefault) toast('当前使用默认密码 admin/admin，建议尽快在「设置」中修改', 'warning', 6000);
+    initData();
+  } catch (e) { _('loginErr').textContent = e.message; }
+}
+async function doLogout() {
+  try { await api('POST', '/auth/logout'); } catch (e) { /* ignore */ }
+  toast('已退出登录', 'info');
+  showLogin();
+}
+async function updateAuth() {
+  const username = _('authUser').value.trim();
+  const currentPassword = _('authCurPass').value;
+  const newPassword = _('authNewPass').value, newPassword2 = _('authNewPass2').value;
+  if (!currentPassword) { toast('请输入当前密码', 'error'); return; }
+  if (!username && !newPassword) { toast('请填写新用户名或新密码', 'error'); return; }
+  if (newPassword && newPassword !== newPassword2) { toast('两次输入的新密码不一致', 'error'); return; }
+  try {
+    const d = await api('POST', '/auth/update', { currentPassword, username, newPassword });
+    toast(d.message || '已更新，请重新登录', 'success');
+    _('authCurPass').value = _('authNewPass').value = _('authNewPass2').value = '';
+    _('loginUser').value = (d.data && d.data.username) || username || _('loginUser').value;
+    showLogin();
+  } catch (e) { toast('更新失败: ' + e.message, 'error'); }
 }
 
 // ========== 仪表盘 ==========
@@ -860,6 +954,23 @@ async function generateKey() {
   } catch (e) { toast('生成失败: ' + e.message, 'error'); }
 }
 
+async function addCustomKey() {
+  const key = _('customKeyInput').value.trim();
+  if (!key) { toast('请输入自定义密钥', 'error'); return; }
+  try {
+    const d = await api('POST', '/keys/add', { key });
+    _('customKeyInput').value = '';
+    _('keyGenResult').innerHTML =
+      '<div style="background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.4);border-radius:10px;padding:12px">' +
+        '<div style="color:var(--accent2);font-weight:600;margin-bottom:8px">✓ 自定义密钥已添加（点击复制）</div>' +
+        '<div class="key-display" onclick="copyText(\'' + esc(d.data.key) + '\')">' + esc(d.data.key) + '</div>' +
+      '</div>';
+    loadKeys();
+    toast('密钥已添加', 'success');
+    setTimeout(() => _('keyGenResult').innerHTML = '', 8000);
+  } catch (e) { toast('添加失败: ' + e.message, 'error'); }
+}
+
 async function deleteKey(key) {
   if (!confirm('确定删除此密钥？')) return;
   try {
@@ -919,7 +1030,8 @@ async function loadLogs() {
 // ========== 导出账号 ==========
 async function exportAccounts() {
   try {
-    const res = await fetch(API + '/accounts/export');
+    const res = await fetch(API + '/accounts/export', { credentials: 'same-origin' });
+    if (res.status === 401) { showLogin(); throw new Error('未登录'); }
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -1164,14 +1276,17 @@ async function loadOcStats() {
 }
 
 // ========== 初始化 ==========
-loadStats();
-loadAccounts();
-loadKeys();
-loadModels();
-loadConfig();
-setInterval(() => { loadStats(); }, 10000);
-setInterval(() => { loadOcStats(); }, 15000);
-setInterval(() => { if (_('tab-logs').style.display !== 'none') loadLogs(); }, 8000);
+function initData() {
+  loadStats();
+  loadAccounts();
+  loadKeys();
+  loadModels();
+  loadConfig();
+}
+checkAuth().then(ok => { if (ok) initData(); });
+setInterval(() => { if (_loggedIn) loadStats(); }, 10000);
+setInterval(() => { if (_loggedIn) loadOcStats(); }, 15000);
+setInterval(() => { if (_loggedIn && _('tab-logs').style.display !== 'none') loadLogs(); }, 8000);
 </script>
 </body>
 </html>`

@@ -21,18 +21,7 @@ type ZenModel struct {
 	Aliases []string `json:"aliases,omitempty"`
 	Context int      `json:"context"`
 	Output  int      `json:"output"`
-	Source  string   `json:"source"` // seed=内置 / synced=动态同步
-}
-
-var zenSeedModels = []ZenModel{
-	{"deepseek-v4-flash-free", []string{"deepseek-v4-flash", "deepseek-v4"}, 200000, 128000, "seed"},
-	{"mimo-v2.5-free", []string{"mimo-v2.5", "mimo"}, 200000, 32000, "seed"},
-	{"ling-3.0-flash-free", []string{"ling-3.0-flash", "ling"}, 200000, 32768, "seed"},
-	{"nemotron-3-ultra-free", []string{"nemotron-3-ultra", "nemotron"}, 1000000, 128000, "seed"},
-	{"north-mini-code-free", []string{"north-mini-code", "north-mini"}, 256000, 64000, "seed"},
-	{"laguna-s-2.1-free", []string{"laguna-s-2.1", "laguna"}, 200000, 32768, "seed"},
-	{"longcat-2.0-free", []string{"longcat-2.0", "longcat"}, 200000, 32768, "seed"},
-	{"big-pickle", nil, 200000, 32000, "seed"},
+	Source  string   `json:"source"` // synced=动态同步
 }
 
 var (
@@ -43,20 +32,8 @@ var (
 
 const zenAPIBase = "https://opencode.ai/zen/v1"
 
-func initZenModels() {
-	zenModelsMu.Lock()
-	defer zenModelsMu.Unlock()
-	if len(zenModels) > 0 {
-		return
-	}
-	for _, m := range zenSeedModels {
-		cp := m
-		zenModels[cp.ID] = &cp
-		for _, a := range cp.Aliases {
-			zenAliases[a] = &cp
-		}
-	}
-}
+// initZenModels 模型表完全由 zen /v1/models 动态同步，不再内置种子模型
+func initZenModels() {}
 
 // resolveZenModel 解析模型名到 zen 模型。支持 "opencode/<id>" 前缀与别名。
 // 别名优先: 同步来的付费同名模型(如 deepseek-v4-flash)不会覆盖 free 别名解析。
@@ -85,12 +62,12 @@ func resolveZenModel(id string) (*ZenModel, bool) {
 	return nil, false
 }
 
-// isZenFreeModel 免费判定: seed 白名单 或 ID 带 -free 后缀
+// isZenFreeModel 免费判定: ID 带 -free 后缀
 func isZenFreeModel(m *ZenModel) bool {
 	if m == nil {
 		return false
 	}
-	return m.Source == "seed" || strings.HasSuffix(m.ID, "-free")
+	return strings.HasSuffix(m.ID, "-free")
 }
 
 // resolveZenFreeModel 只解析免费 zen 模型
@@ -543,12 +520,21 @@ func syncZenModels() (int, error) {
 			continue
 		}
 		// 新模型:默认按 200K 上下文接入,输出按 32K
-		zenModels[id] = &ZenModel{
+		m := &ZenModel{
 			ID:      id,
 			Context: 200000,
 			Output:  32768,
 			Source:  "synced",
 		}
+		// 免费模型自动注册去掉 -free 后缀的别名,便于 deepseek-v4-flash 这类简写直接命中免费版
+		if strings.HasSuffix(id, "-free") {
+			alias := strings.TrimSuffix(id, "-free")
+			if _, taken := zenAliases[alias]; !taken {
+				m.Aliases = []string{alias}
+				zenAliases[alias] = m
+			}
+		}
+		zenModels[id] = m
 		added++
 	}
 	return added, nil
@@ -558,7 +544,7 @@ func syncZenModels() (int, error) {
 func startZenModelsRefresher() {
 	go func() {
 		if _, err := syncZenModels(); err != nil {
-			log.Printf("zen model sync: failed (%v), using seed list", err)
+			log.Printf("zen model sync: failed (%v), model list is empty until next sync", err)
 		}
 		ticker := time.NewTicker(10 * time.Minute)
 		for range ticker.C {

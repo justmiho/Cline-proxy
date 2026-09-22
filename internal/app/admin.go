@@ -46,38 +46,46 @@ func writeAPI(w http.ResponseWriter, status int, resp apiResponse) {
 
 func registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/", adminStaticHandler)
-	mux.HandleFunc("/admin/api/accounts", corsHandler(handleAdminAccounts))
-	mux.HandleFunc("/admin/api/accounts/add", corsHandler(handleAdminAccountAdd))
-	mux.HandleFunc("/admin/api/accounts/delete", corsHandler(handleAdminAccountDelete))
-	mux.HandleFunc("/admin/api/accounts/test", corsHandler(handleAdminAccountTest))
-	mux.HandleFunc("/admin/api/oauth/start", corsHandler(handleOAuthStart))
-	mux.HandleFunc("/admin/api/oauth/status", corsHandler(handleOAuthStatus))
-	mux.HandleFunc("/admin/api/sso/import", corsHandler(handleSSOImport))
-	mux.HandleFunc("/admin/api/stats", corsHandler(handleAdminStats))
-	mux.HandleFunc("/admin/api/batch-import", corsHandler(handleBatchImport))
-	mux.HandleFunc("/admin/api/accounts/refresh-all", corsHandler(handleAdminRefreshAll))
-	mux.HandleFunc("/admin/api/accounts/delete-all", corsHandler(handleAdminDeleteAll))
-	mux.HandleFunc("/admin/api/accounts/reset", corsHandler(handleAdminAccountReset))
-	mux.HandleFunc("/admin/api/accounts/export", corsHandler(handleAccountsExport))
-	mux.HandleFunc("/admin/api/logs", corsHandler(handleRequestLogs))
-	mux.HandleFunc("/admin/api/keys", corsHandler(handleAdminGetKeys))
-	mux.HandleFunc("/admin/api/keys/generate", corsHandler(handleAdminGenerateKey))
-	mux.HandleFunc("/admin/api/keys/delete", corsHandler(handleAdminDeleteKey))
-	mux.HandleFunc("/admin/api/models", corsHandler(handleAdminModels))
-	mux.HandleFunc("/admin/api/models/refresh", corsHandler(handleAdminModelsRefresh))
-	mux.HandleFunc("/admin/api/config", corsHandler(handleAdminConfig))
-	mux.HandleFunc("/admin/api/config/update", corsHandler(handleAdminUpdateConfig))
-	mux.HandleFunc("/admin/api/opencode/config", corsHandler(handleZenConfig))
-	mux.HandleFunc("/admin/api/opencode/config/update", corsHandler(handleZenConfigUpdate))
-	mux.HandleFunc("/admin/api/opencode/models", corsHandler(handleZenModels))
-	mux.HandleFunc("/admin/api/opencode/models/refresh", corsHandler(handleZenModelsRefresh))
-	mux.HandleFunc("/admin/api/opencode/stats", corsHandler(handleZenStats))
+	// 登录相关：无需会话
+	mux.HandleFunc("/admin/api/auth/login", corsHandler(handleAuthLogin))
+	mux.HandleFunc("/admin/api/auth/logout", corsHandler(handleAuthLogout))
+	mux.HandleFunc("/admin/api/auth/me", corsHandler(handleAuthMe))
+	// 其余管理 API 一律要求登录
+	guarded := func(h http.HandlerFunc) http.HandlerFunc { return corsHandler(adminAuth(h)) }
+	mux.HandleFunc("/admin/api/auth/update", guarded(handleAuthUpdate))
+	mux.HandleFunc("/admin/api/accounts", guarded(handleAdminAccounts))
+	mux.HandleFunc("/admin/api/accounts/add", guarded(handleAdminAccountAdd))
+	mux.HandleFunc("/admin/api/accounts/delete", guarded(handleAdminAccountDelete))
+	mux.HandleFunc("/admin/api/accounts/test", guarded(handleAdminAccountTest))
+	mux.HandleFunc("/admin/api/oauth/start", guarded(handleOAuthStart))
+	mux.HandleFunc("/admin/api/oauth/status", guarded(handleOAuthStatus))
+	mux.HandleFunc("/admin/api/sso/import", guarded(handleSSOImport))
+	mux.HandleFunc("/admin/api/stats", guarded(handleAdminStats))
+	mux.HandleFunc("/admin/api/batch-import", guarded(handleBatchImport))
+	mux.HandleFunc("/admin/api/accounts/refresh-all", guarded(handleAdminRefreshAll))
+	mux.HandleFunc("/admin/api/accounts/delete-all", guarded(handleAdminDeleteAll))
+	mux.HandleFunc("/admin/api/accounts/reset", guarded(handleAdminAccountReset))
+	mux.HandleFunc("/admin/api/accounts/export", guarded(handleAccountsExport))
+	mux.HandleFunc("/admin/api/logs", guarded(handleRequestLogs))
+	mux.HandleFunc("/admin/api/keys", guarded(handleAdminGetKeys))
+	mux.HandleFunc("/admin/api/keys/generate", guarded(handleAdminGenerateKey))
+	mux.HandleFunc("/admin/api/keys/add", guarded(handleAdminAddKey))
+	mux.HandleFunc("/admin/api/keys/delete", guarded(handleAdminDeleteKey))
+	mux.HandleFunc("/admin/api/models", guarded(handleAdminModels))
+	mux.HandleFunc("/admin/api/models/refresh", guarded(handleAdminModelsRefresh))
+	mux.HandleFunc("/admin/api/config", guarded(handleAdminConfig))
+	mux.HandleFunc("/admin/api/config/update", guarded(handleAdminUpdateConfig))
+	mux.HandleFunc("/admin/api/opencode/config", guarded(handleZenConfig))
+	mux.HandleFunc("/admin/api/opencode/config/update", guarded(handleZenConfigUpdate))
+	mux.HandleFunc("/admin/api/opencode/models", guarded(handleZenModels))
+	mux.HandleFunc("/admin/api/opencode/models/refresh", guarded(handleZenModelsRefresh))
+	mux.HandleFunc("/admin/api/opencode/stats", guarded(handleZenStats))
 	// 旧 zen 路径别名,兼容旧引用
-	mux.HandleFunc("/admin/api/zen/config", corsHandler(handleZenConfig))
-	mux.HandleFunc("/admin/api/zen/config/update", corsHandler(handleZenConfigUpdate))
-	mux.HandleFunc("/admin/api/zen/models", corsHandler(handleZenModels))
-	mux.HandleFunc("/admin/api/zen/models/refresh", corsHandler(handleZenModelsRefresh))
-	mux.HandleFunc("/admin/api/zen/stats", corsHandler(handleZenStats))
+	mux.HandleFunc("/admin/api/zen/config", guarded(handleZenConfig))
+	mux.HandleFunc("/admin/api/zen/config/update", guarded(handleZenConfigUpdate))
+	mux.HandleFunc("/admin/api/zen/models", guarded(handleZenModels))
+	mux.HandleFunc("/admin/api/zen/models/refresh", guarded(handleZenModelsRefresh))
+	mux.HandleFunc("/admin/api/zen/stats", guarded(handleZenStats))
 	mux.HandleFunc("/admin/zen/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/", http.StatusFound)
 	})
@@ -846,6 +854,51 @@ func handleAdminGenerateKey(w http.ResponseWriter, r *http.Request) {
 	key := fmt.Sprintf("cline_%x_%x", time.Now().UnixMilli(), time.Now().UnixNano()%1000000)
 	p := loadPool()
 	poolMu.Lock()
+	p.Keys = append(p.Keys, key)
+	poolMu.Unlock()
+	savePool()
+	writeAPI(w, http.StatusOK, apiResponse{Success: true, Data: map[string]any{"key": key}})
+}
+
+// POST /admin/api/keys/add  body: { key }  自定义密钥
+func handleAdminAddKey(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		writeAPI(w, http.StatusMethodNotAllowed, apiResponse{Error: "method not allowed"})
+		return
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeAPI(w, http.StatusBadRequest, apiResponse{Error: err.Error()})
+		return
+	}
+	defer r.Body.Close()
+	var req struct {
+		Key string `json:"key"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeAPI(w, http.StatusBadRequest, apiResponse{Error: "invalid JSON"})
+		return
+	}
+	key := strings.TrimSpace(req.Key)
+	if len(key) < 8 || len(key) > 256 {
+		writeAPI(w, http.StatusBadRequest, apiResponse{Error: "密钥长度需在 8~256 之间"})
+		return
+	}
+	for _, c := range key {
+		if c <= ' ' || c > '~' {
+			writeAPI(w, http.StatusBadRequest, apiResponse{Error: "密钥只能包含可见 ASCII 字符，不能有空格"})
+			return
+		}
+	}
+	p := loadPool()
+	poolMu.Lock()
+	for _, k := range p.Keys {
+		if k == key {
+			poolMu.Unlock()
+			writeAPI(w, http.StatusBadRequest, apiResponse{Error: "密钥已存在"})
+			return
+		}
+	}
 	p.Keys = append(p.Keys, key)
 	poolMu.Unlock()
 	savePool()
